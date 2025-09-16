@@ -53,9 +53,16 @@ class NetworkAdapter:
             if self.wmi_conn is None:
                 self._init_wmi_connection()
             
-            # 获取物理网络适配器
+            # 获取物理网络适配器，包括已连接和未连接的
             for adapter in self.wmi_conn.Win32_NetworkAdapter():
-                if adapter.PhysicalAdapter and adapter.NetEnabled:
+                # 更宽松的筛选条件：物理适配器且不是软件适配器
+                if (adapter.PhysicalAdapter and 
+                    adapter.Name and 
+                    adapter.MACAddress and
+                    'Virtual' not in adapter.Name and
+                    'Loopback' not in adapter.Name and
+                    'Wireless' not in adapter.Name):
+                    
                     adapter_info = {
                         'name': adapter.Name,
                         'device_id': adapter.DeviceID,
@@ -72,9 +79,15 @@ class NetworkAdapter:
             # WMI连接失败时，尝试重新连接
             try:
                 self.reconnect_wmi()
-                # 重试一次
+                # 重试一次，使用更宽松的条件
                 for adapter in self.wmi_conn.Win32_NetworkAdapter():
-                    if adapter.PhysicalAdapter and adapter.NetEnabled:
+                    if (adapter.PhysicalAdapter and 
+                        adapter.Name and 
+                        adapter.MACAddress and
+                        'Virtual' not in adapter.Name and
+                        'Loopback' not in adapter.Name and
+                        'Wireless' not in adapter.Name):
+                        
                         adapter_info = {
                             'name': adapter.Name,
                             'device_id': adapter.DeviceID,
@@ -101,8 +114,11 @@ class NetworkAdapter:
                                   capture_output=True, text=True, shell=True)
             
             if result.returncode == 0 and result.stdout.strip():
-                data = json.loads(result.stdout)
-                return data.get('IPAddress', 'Unknown')
+                try:
+                    data = json.loads(result.stdout)
+                    return data.get('IPAddress', 'Unknown')
+                except (json.JSONDecodeError, ValueError):
+                    pass
         except:
             pass
         return 'Unknown'
@@ -124,13 +140,16 @@ class NetworkAdapter:
                                       capture_output=True, text=True, shell=True)
                 
                 if result.returncode == 0 and result.stdout.strip():
-                    data = json.loads(result.stdout)
-                    speed_value = data.get('LinkSpeed') or data.get('DisplayValue')
-                    if speed_value and speed_value != 'Unknown':
-                        # 格式化速度显示
-                        if isinstance(speed_value, int):
-                            return f"{speed_value // 1000000} Mbps"
-                        return str(speed_value)
+                    try:
+                        data = json.loads(result.stdout)
+                        speed_value = data.get('LinkSpeed') or data.get('DisplayValue')
+                        if speed_value and speed_value != 'Unknown':
+                            # 格式化速度显示
+                            if isinstance(speed_value, int):
+                                return f"{speed_value // 1000000} Mbps"
+                            return str(speed_value)
+                    except (json.JSONDecodeError, ValueError):
+                        continue
         except:
             pass
         return 'Unknown'
@@ -152,18 +171,21 @@ class NetworkAdapter:
                                       capture_output=True, text=True, shell=True)
                 
                 if result.returncode == 0 and result.stdout.strip():
-                    data = json.loads(result.stdout)
-                    duplex_value = data.get('FullDuplex') or data.get('DisplayValue')
-                    if duplex_value is not None and duplex_value != 'Unknown':
-                        # 格式化双工模式显示为中文
-                        if isinstance(duplex_value, bool):
-                            return "全双工" if duplex_value else "半双工"
-                        duplex_str = str(duplex_value).lower()
-                        if 'full' in duplex_str:
-                            return "全双工"
-                        elif 'half' in duplex_str:
-                            return "半双工"
-                        return str(duplex_value)
+                    try:
+                        data = json.loads(result.stdout)
+                        duplex_value = data.get('FullDuplex') or data.get('DisplayValue')
+                        if duplex_value is not None and duplex_value != 'Unknown':
+                            # 格式化双工模式显示为中文
+                            if isinstance(duplex_value, bool):
+                                return "全双工" if duplex_value else "半双工"
+                            duplex_str = str(duplex_value).lower()
+                            if 'full' in duplex_str:
+                                return "全双工"
+                            elif 'half' in duplex_str:
+                                return "半双工"
+                            return str(duplex_value)
+                    except (json.JSONDecodeError, ValueError):
+                        continue
         except:
             pass
         return 'Unknown'
@@ -180,14 +202,16 @@ class NetworkAdapter:
         """动态获取适配器支持的速度双工选项"""
         if adapter_name:
             try:
-                cmd = f'Get-NetAdapterAdvancedProperty -Name "{adapter_name}" -RegistryKeyword "*SpeedDuplex" | Select-Object -ExpandProperty ValidDisplayValues'
+                # 转义适配器名称中的特殊字符
+                safe_name = adapter_name.replace('"', '`"').replace("'", "`'")
+                cmd = f'Get-NetAdapterAdvancedProperty -Name "{safe_name}" -RegistryKeyword "*SpeedDuplex" | Select-Object -ExpandProperty ValidDisplayValues'
                 result = subprocess.run(['powershell', '-Command', cmd], 
-                                      capture_output=True, text=True, shell=True)
+                                      capture_output=True, text=True, shell=True, timeout=10)
                 
                 if result.returncode == 0 and result.stdout.strip():
                     options = [line.strip() for line in result.stdout.strip().split('\n') if line.strip()]
                     return options
-            except:
+            except (subprocess.TimeoutExpired, subprocess.SubprocessError):
                 pass
         
         # 如果无法获取实际选项，返回空列表

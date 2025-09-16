@@ -24,25 +24,39 @@ class NetworkSettings:
         """执行PowerShell命令并返回结果"""
         try:
             result = subprocess.run(['powershell', '-Command', command], 
-                                  capture_output=True, text=True, shell=True)
+                                  capture_output=True, text=True, shell=True, timeout=10)
             
             if result.returncode == 0:
                 return True, result.stdout.strip()
             else:
-                return False, result.stderr.strip()
+                error_msg = result.stderr.strip() or result.stdout.strip() or "PowerShell命令执行失败"
+                return False, error_msg
+        except subprocess.TimeoutExpired:
+            return False, "PowerShell命令执行超时"
         except Exception as e:
-            return False, str(e)
+            return False, f"PowerShell命令执行异常: {str(e)}"
     
     def set_adapter_speed_duplex(self, adapter_name: str, speed_duplex: str) -> Tuple[bool, str]:
         """设置适配器的速度和双工模式"""
         if not self.is_admin:
             return False, "需要管理员权限才能修改网络设置"
         
+        # 验证和清理输入参数
+        if not adapter_name or not adapter_name.strip():
+            return False, "适配器名称不能为空"
+        
+        if not speed_duplex or not speed_duplex.strip():
+            return False, "速度双工设置不能为空"
+        
         try:
+            # 转义特殊字符
+            safe_adapter_name = adapter_name.replace('"', '`"').replace("'", "`'")
+            safe_speed_duplex = speed_duplex.replace('"', '`"').replace("'", "`'")
+            
             # 先尝试使用 RegistryKeyword，再回退到 DisplayName 匹配
             commands = [
-                f'Set-NetAdapterAdvancedProperty -Name "{adapter_name}" -RegistryKeyword "*SpeedDuplex" -DisplayValue "{speed_duplex}"',
-                f'Set-NetAdapterAdvancedProperty -Name "{adapter_name}" -DisplayName "*Speed*Duplex*" -DisplayValue "{speed_duplex}"'
+                f'Set-NetAdapterAdvancedProperty -Name "{safe_adapter_name}" -RegistryKeyword "*SpeedDuplex" -DisplayValue "{safe_speed_duplex}"',
+                f'Set-NetAdapterAdvancedProperty -Name "{safe_adapter_name}" -DisplayName "*Speed*Duplex*" -DisplayValue "{safe_speed_duplex}"'
             ]
             last_err = ''
             for command in commands:
@@ -52,7 +66,7 @@ class NetworkSettings:
                 last_err = message
             # 两种方式都失败，返回更清晰的错误并提示可用值
             tips_cmd = (
-                f'Get-NetAdapterAdvancedProperty -Name "{adapter_name}" | '
+                f'Get-NetAdapterAdvancedProperty -Name "{safe_adapter_name}" | '
                 f'Where-Object {{$_.RegistryKeyword -like "*Speed*" -or $_.DisplayName -like "*Duplex*" -or $_.DisplayName -like "*Speed*"}} | '
                 'Select-Object -Property DisplayName, RegistryKeyword, DisplayValue | Format-Table -AutoSize'
             )
@@ -62,26 +76,6 @@ class NetworkSettings:
                 
         except Exception as e:
             return False, f"设置失败: {str(e)}"
-    
-    def _parse_speed_duplex(self, speed_duplex: str) -> Tuple[int, str]:
-        """解析速度和双工设置"""
-        if "半双工" in speed_duplex:
-            duplex = "Half"
-        elif "全双工" in speed_duplex:
-            duplex = "Full"
-        else:
-            duplex = "Auto"
-        
-        if "10 Mbps" in speed_duplex:
-            speed = 10
-        elif "100 Mbps" in speed_duplex:
-            speed = 100
-        elif "1.0 Gbps" in speed_duplex or "1000 Mbps" in speed_duplex:
-            speed = 1000
-        else:
-            speed = 0  # 自动协商
-        
-        return speed, duplex
     
     def get_valid_speed_duplex_options(self, adapter_name: str) -> List[str]:
         """获取适配器支持的速度双工选项"""
@@ -105,18 +99,24 @@ class NetworkSettings:
     
     def get_current_speed_duplex(self, adapter_name: str) -> str:
         """获取当前的速度双工设置"""
+        if not adapter_name or not adapter_name.strip():
+            return "Unknown"
+            
         try:
+            # 转义特殊字符
+            safe_adapter_name = adapter_name.replace('"', '`"').replace("'", "`'")
+            
             # 使用 Get-NetAdapterAdvancedProperty 获取当前设置
             commands = [
-                f'Get-NetAdapterAdvancedProperty -Name "{adapter_name}" -RegistryKeyword "*SpeedDuplex" | Select-Object -ExpandProperty DisplayValue',
-                f'Get-NetAdapterAdvancedProperty -Name "{adapter_name}" -DisplayName "*Speed*Duplex*" | Select-Object -ExpandProperty DisplayValue'
+                f'Get-NetAdapterAdvancedProperty -Name "{safe_adapter_name}" -RegistryKeyword "*SpeedDuplex" | Select-Object -ExpandProperty DisplayValue',
+                f'Get-NetAdapterAdvancedProperty -Name "{safe_adapter_name}" -DisplayName "*Speed*Duplex*" | Select-Object -ExpandProperty DisplayValue'
             ]
             for command in commands:
                 result = subprocess.run(['powershell', '-Command', command], 
-                                      capture_output=True, text=True, shell=True)
+                                      capture_output=True, text=True, shell=True, timeout=10)
                 if result.returncode == 0 and result.stdout.strip():
                     return result.stdout.strip()
-        except:
+        except (subprocess.TimeoutExpired, subprocess.SubprocessError):
             pass
         return "Unknown"
     
