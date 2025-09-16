@@ -6,31 +6,88 @@
 import wmi
 import subprocess
 import json
+import pythoncom
 from typing import List, Dict, Optional
 
 
 class NetworkAdapter:
     def __init__(self):
-        self.wmi_conn = wmi.WMI()
+        self.wmi_conn = None
+        self._init_wmi_connection()
+    
+    def _init_wmi_connection(self):
+        """初始化WMI连接，带重试机制"""
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                # 在多线程环境中初始化COM组件
+                try:
+                    pythoncom.CoInitialize()
+                except:
+                    pass  # 如果已经初始化过，忽略错误
+                
+                self.wmi_conn = wmi.WMI()
+                return
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    raise Exception(f"WMI连接失败，已重试{max_retries}次: {str(e)}")
+                import time
+                time.sleep(1)  # 等待1秒后重试
+    
+    def reconnect_wmi(self):
+        """重新连接WMI"""
+        self.wmi_conn = None
+        # 在重连前也初始化COM组件
+        try:
+            pythoncom.CoInitialize()
+        except:
+            pass  # 如果已经初始化过，忽略错误
+        self._init_wmi_connection()
     
     def get_all_adapters(self) -> List[Dict]:
         """获取所有网络适配器信息"""
         adapters = []
         
-        # 获取物理网络适配器
-        for adapter in self.wmi_conn.Win32_NetworkAdapter():
-            if adapter.PhysicalAdapter and adapter.NetEnabled:
-                adapter_info = {
-                    'name': adapter.Name,
-                    'device_id': adapter.DeviceID,
-                    'mac_address': adapter.MACAddress,
-                    'alias': adapter.NetConnectionID,
-                    'ip_address': self._get_adapter_ip(adapter.NetConnectionID),
-                    'status': adapter.NetConnectionStatus,
-                    'speed': self._get_adapter_speed(adapter.NetConnectionID),
-                    'duplex': self._get_adapter_duplex(adapter.NetConnectionID)
-                }
-                adapters.append(adapter_info)
+        try:
+            # 检查WMI连接
+            if self.wmi_conn is None:
+                self._init_wmi_connection()
+            
+            # 获取物理网络适配器
+            for adapter in self.wmi_conn.Win32_NetworkAdapter():
+                if adapter.PhysicalAdapter and adapter.NetEnabled:
+                    adapter_info = {
+                        'name': adapter.Name,
+                        'device_id': adapter.DeviceID,
+                        'mac_address': adapter.MACAddress,
+                        'alias': adapter.NetConnectionID,
+                        'ip_address': self._get_adapter_ip(adapter.NetConnectionID),
+                        'status': adapter.NetConnectionStatus,
+                        'speed': self._get_adapter_speed(adapter.NetConnectionID),
+                        'duplex': self._get_adapter_duplex(adapter.NetConnectionID)
+                    }
+                    adapters.append(adapter_info)
+        
+        except Exception as e:
+            # WMI连接失败时，尝试重新连接
+            try:
+                self.reconnect_wmi()
+                # 重试一次
+                for adapter in self.wmi_conn.Win32_NetworkAdapter():
+                    if adapter.PhysicalAdapter and adapter.NetEnabled:
+                        adapter_info = {
+                            'name': adapter.Name,
+                            'device_id': adapter.DeviceID,
+                            'mac_address': adapter.MACAddress,
+                            'alias': adapter.NetConnectionID,
+                            'ip_address': self._get_adapter_ip(adapter.NetConnectionID),
+                            'status': adapter.NetConnectionStatus,
+                            'speed': self._get_adapter_speed(adapter.NetConnectionID),
+                            'duplex': self._get_adapter_duplex(adapter.NetConnectionID)
+                        }
+                        adapters.append(adapter_info)
+            except Exception as retry_error:
+                raise Exception(f"获取网络适配器失败: {str(retry_error)}")
         
         return adapters
     
@@ -133,5 +190,5 @@ class NetworkAdapter:
             except:
                 pass
         
-        # 默认选项（如果无法获取实际选项）
-        return ["自动侦测", "10 Mbps 半双工", "10 Mbps 全双工", "100 Mbps 半双工", "100 Mbps 全双工", "1.0 Gbps 全双工"]
+        # 如果无法获取实际选项，返回空列表
+        return []
