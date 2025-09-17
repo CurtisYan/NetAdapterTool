@@ -4,9 +4,7 @@ Windows系统网络适配器速度和双工模式管理工具，支持图形化�
 
 ## 示例截图
 
-![示例1](img/example1.png)
-
-![示例2](img/example2.png)
+![示例1](img/example1.png) ![示例2](img/example2.png)
 
 ## 功能特性
 
@@ -27,7 +25,7 @@ python gui.py
 
 ## 注意事项
 
-- ❗❗❗右键属性-勾选 以管理员启动✔
+❗❗❗右键属性-勾选 以管理员启动✔
 
 
 ## 许可证
