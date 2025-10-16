@@ -2,10 +2,14 @@
 
 Windows系统网络适配器速度和双工模式管理工具，支持图形化界面操作。为NA（广软网协）而做
 
+## 下载
+- GitHub 发布页：[Releases](https://github.com/CurtisYan/NetAdapterTool/releases)
+- 123云盘镜像：[123云盘免登录下载不限速](https://www.123912.com/s/S20tjv-yXVsd)
+
 ## 示例截图
-
+ 
 ![示例1](img/example1.png) ![示例2](img/example2.png)
-
+ 
 ## 功能特性
 
 本工具提供现代化的图形界面，支持查看和管理Windows系统中的网络适配器设置，包括实时显示网络速度、双工模式和IP地址信息，具备自动权限检测和多线程处理能力，确保操作流畅不卡顿。
@@ -31,7 +35,7 @@ Windows系统网络适配器速度和双工模式管理工具，支持图形化�
 
 ## 快速开始
 
-### 方式1：直接运行Python脚本
+### 源码运行
 
 #### 安装依赖
 ```bash
@@ -40,35 +44,35 @@ pip install -r requirements.txt
 
 #### 运行程序
 ```bash
-# 标准运行方式（显示控制台）
 python gui.py
-
-# 无控制台运行方式（推荐）
-python gui_no_console.pyw
-# 或者直接双击 gui_no_console.pyw 文件
 ```
 
 **注意**：需要以管理员身份运行命令行或IDE
 
-### 方式2：使用一键打包脚本 ⭐ **推荐**
+## 打包（Nuitka）
 
-#### 安装打包工具
-```bash
-pip install pyinstaller
+在项目根目录执行以下命令完成打包（示例）：
+
+```bat
+nuitka ^
+  --standalone --onefile ^
+  --enable-plugin=pyqt5 ^
+  --include-qt-plugins=platforms,imageformats,styles ^
+  --python-flag=-OO ^
+  --nofollow-import-to=PyQt5.QtQml,PyQt5.QtQuick,PyQt5.QtWebEngineWidgets,PyQt5.QtWebKit,PyQt5.QtMultimedia,PyQt5.QtNetwork,PyQt5.QtSql,PyQt5.QtPrintSupport,tkinter,matplotlib,numpy,pandas ^
+  --enable-plugin=upx ^
+  --upx-binary="D:\upx\upx.exe" ^
+  --onefile-no-compression ^
+  --windows-uac-admin ^
+  --windows-console-mode=disable ^
+  --windows-icon-from-ico=img/NA.ico ^
+  --include-data-dir=img=img ^
+  --product-name="NetAdapterTool" ^
+  --file-version=1.0.0 ^
+  --product-version=1.0.0 ^
+  --output-filename="网络适配器修改器.exe" ^
+  gui.py
 ```
-
-#### 一键打包
-```bash
-# 双击运行或在命令行执行
-build.bat
-```
-
-打包完成后会生成 `NetAdapterTool.exe`，该程序：
-- ✅ **自动请求管理员权限** - 无需手动设置
-- ✅ **独立运行** - 无需安装Python环境  
-- ✅ **防杀毒误报** - 符合Windows安全规范
-- ✅ **一键启动** - 双击即可使用
-
 
 ## 注意事项
 
@@ -78,25 +82,24 @@ build.bat
 ### 生产环境  
 ✅ 使用打包后的exe文件，会自动请求管理员权限
 
-## 打包说明
+## 项目结构
 
-### 打包脚本功能
-`build.bat` 脚本会自动：
-1. 使用PyInstaller打包工具
-2. 生成带控制台窗口的调试版本
-3. 自动请求管理员权限
-4. 包含所有必要的依赖项和资源文件
-
-### 打包参数说明
-- `--onefile`: 生成单个exe文件
-- `--console`: 显示控制台窗口（便于调试）
-- `--uac-admin`: 自动请求管理员权限
-- `--icon`: 添加程序图标
-- `--add-data`: 包含资源文件
-
-#### 手动配置管理员权限
-对于其他打包工具，需要创建应用程序清单文件来请求管理员权限。
-
+```text
+NetAdapterTool/
+├─ gui.py
+├─ network_adapter.py
+├─ network_settings.py
+├─ system_compatibility.py
+├─ app.manifest
+├─ requirements.txt
+├─ img/
+│  ├─ NA.ico
+│  ├─ example1.png
+│  ├─ example2.png
+│  └─ NA (蓝透明).jpg
+  └─ README.md
+```
+ 
 ## 故障排除
 
 ### 常见问题
