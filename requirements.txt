@@ -1,3 +1,23 @@
-wmi==1.5.1
-pywin32==306
-PyQt5==5.15.10
+# 网络适配器管理工具依赖项
+
+# 核心运行时依赖
+# WMI支持 - Windows管理接口
+wmi>=1.5.1
+
+# Windows API支持 - 系统调用和权限管理
+pywin32>=306
+
+# GUI框架 - 图形用户界面
+PyQt5>=5.15.0,<6.0.0
+
+# 开发和打包工具（可选）
+# 如需打包为exe文件，请安装以下工具之一：
+
+# 方案1：Nuitka (推荐) - 高性能Python编译器
+nuitka>=1.8.0
+
+# 方案2：PyInstaller - 传统打包工具  
+# pyinstaller>=5.0.0
+
+# 方案3：cx_Freeze - 跨平台打包
+# cx-freeze>=6.0.0

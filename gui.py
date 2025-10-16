@@ -1,21 +1,23 @@
 """
-网络适配器管理工具图形界面
-使用PyQt5实现简洁的GUI界面
+优化版网络适配器管理工具图形界面
+解决卡死问题，提升启动速度和响应性
 """
 
 import sys
 import os
 import ctypes
 import logging
+import pythoncom
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QLabel, QComboBox, QPushButton, 
-                             QGroupBox, QMessageBox, QProgressBar, QDialog,
-                             QTextBrowser, QScrollArea, QTextEdit)
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QUrl
-from PyQt5.QtGui import QFont, QPixmap, QDesktopServices, QIcon
-from PyQt5.QtSvg import QSvgWidget
+                             QGroupBox, QMessageBox, QProgressBar, QTextEdit, QCheckBox)
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
+from PyQt5.QtGui import QFont, QPixmap, QIcon
+
+# 导入网络适配器模块
 from network_adapter import NetworkAdapter
 from network_settings import NetworkSettings
+from system_compatibility import SystemCompatibility
 
 # 自定义日志处理器，用于捕获日志到GUI
 class GuiLogHandler(logging.Handler):
@@ -45,204 +47,60 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.StreamHandler(sys.stdout),  # 输出到控制台
-        gui_log_handler  # 输出到GUI
+        logging.StreamHandler(sys.stdout),
+        gui_log_handler
     ]
 )
 
 
-class AboutDialog(QDialog):
-    """关于对话框"""
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("关于 - 网络适配器管理工具")
-        self.setFixedSize(450, 600)
-        self.setWindowFlags(Qt.Dialog | Qt.WindowCloseButtonHint)
-        self.init_ui()
+class InitializationThread(QThread):
+    """初始化线程，避免主线程阻塞"""
+    finished = pyqtSignal(bool, str, object)  # 成功标志，错误信息，适配器对象
+    progress_update = pyqtSignal(str)  # 进度更新信号
     
-    def init_ui(self):
-        """初始化关于对话框界面"""
-        layout = QVBoxLayout(self)
-        layout.setSpacing(10)
-        layout.setContentsMargins(20, 20, 20, 20)
-        
-        # 主内容布局（不使用滚动区域）
-        content_layout = QVBoxLayout()
-        content_layout.setSpacing(8)
-        
-        # 应用图标和标题
-        title_layout = QHBoxLayout()
-        
-        # 尝试加载应用图标
-        icon_label = QLabel()
+    def __init__(self):
+        super().__init__()
+    
+    def run(self):
+        # 每个线程必须初始化COM
         try:
-            icon_path = os.path.join(os.path.dirname(__file__), "img", "NA (蓝透明).jpg")
-            if os.path.exists(icon_path):
-                pixmap = QPixmap(icon_path)
-                if not pixmap.isNull():
-                    # 调整图标大小
-                    scaled_pixmap = pixmap.scaled(48, 48, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                    icon_label.setPixmap(scaled_pixmap)
-                else:
-                    raise ValueError("图片加载失败")
-            else:
-                raise FileNotFoundError("图标文件不存在")
-        except (FileNotFoundError, ValueError, OSError):
-            # 图标加载失败时使用默认图标
-            icon_label.setText("💻")
-            icon_label.setFont(QFont("", 32))
-            icon_label.setAlignment(Qt.AlignCenter)
-        title_layout.addWidget(icon_label)
-        
-        # 标题信息
-        title_info_layout = QVBoxLayout()
-        app_title = QLabel("网络适配器管理工具")
-        app_title.setFont(QFont("Microsoft YaHei", 16, QFont.Bold))
-        app_title.setAlignment(Qt.AlignLeft)
-        title_info_layout.addWidget(app_title)
-        
-        version_label = QLabel("版本 1.0")
-        version_label.setFont(QFont("Microsoft YaHei", 9))
-        version_label.setStyleSheet("color: #666666;")
-        title_info_layout.addWidget(version_label)
-        
-        title_layout.addLayout(title_info_layout)
-        title_layout.addStretch()
-        content_layout.addLayout(title_layout)
-        
-        # 分隔线
-        separator1 = QLabel()
-        separator1.setStyleSheet("border-bottom: 1px solid #E0E0E0; margin: 5px 0;")
-        content_layout.addWidget(separator1)
-        
-        # 归属信息 - 突出显示
-        ownership_layout = QVBoxLayout()
-        ownership_layout.setSpacing(3)
-        ownership_text = QLabel("该应用归")
-        ownership_text.setFont(QFont("Microsoft YaHei", 11))
-        ownership_text.setAlignment(Qt.AlignCenter)
-        ownership_layout.addWidget(ownership_text)
-        
-        # 广软网络管理工作站 - 大字体可点击
-        workstation_label = QLabel('<a href="https://service.seig.edu.cn/join" style="text-decoration: none; color: #1976D2;">广软网络管理工作站</a>')
-        workstation_label.setFont(QFont("Microsoft YaHei", 18, QFont.Bold))
-        workstation_label.setAlignment(Qt.AlignCenter)
-        workstation_label.setOpenExternalLinks(True)
-        workstation_label.setStyleSheet("""
-            QLabel {
-                padding: 8px;
-                border: 2px solid #1976D2;
-                border-radius: 6px;
-                background-color: #E3F2FD;
-                margin: 5px 0;
-            }
-            QLabel:hover {
-                background-color: #BBDEFB;
-            }
-        """)
-        ownership_layout.addWidget(workstation_label)
-        
-        ownership_text2 = QLabel("所有")
-        ownership_text2.setFont(QFont("Microsoft YaHei", 11))
-        ownership_text2.setAlignment(Qt.AlignCenter)
-        ownership_layout.addWidget(ownership_text2)
-        
-        content_layout.addLayout(ownership_layout)
-        
-        # 欢迎信息
-        welcome_label = QLabel("欢迎使用和分享")
-        welcome_label.setFont(QFont("Microsoft YaHei", 11))
-        welcome_label.setAlignment(Qt.AlignCenter)
-        welcome_label.setStyleSheet("color: #4CAF50; font-weight: bold; margin: 3px 0;")
-        content_layout.addWidget(welcome_label)
-        
-        # 分隔线
-        separator2 = QLabel()
-        separator2.setStyleSheet("border-bottom: 1px solid #E0E0E0; margin: 5px 0;")
-        content_layout.addWidget(separator2)
-        
-        # GitHub 链接
-        github_layout = QHBoxLayout()
-        github_layout.setAlignment(Qt.AlignCenter)
-        
-        # GitHub 图标
-        try:
-            github_svg_path = os.path.join(os.path.dirname(__file__), "img", "github-fill.svg")
-            if os.path.exists(github_svg_path):
-                github_icon = QSvgWidget(github_svg_path)
-                github_icon.setFixedSize(18, 18)
-            else:
-                raise FileNotFoundError("GitHub图标文件不存在")
-        except (FileNotFoundError, OSError):
-            github_icon = QLabel("⭐")
-            github_icon.setFont(QFont("", 16))
-            github_icon.setStyleSheet("color: #333333;")
-        github_layout.addWidget(github_icon)
-        
-        github_text = QLabel('<a href="https://github.com/CurtisYan/NetAdapterTool" style="text-decoration: none; color: #333333;">GitHub 项目地址</a>')
-        github_text.setFont(QFont("Microsoft YaHei", 11))
-        github_text.setOpenExternalLinks(True)
-        github_layout.addWidget(github_text)
-        
-        content_layout.addLayout(github_layout)
-        
-        # 贡献信息
-        contribute_label = QLabel("欢迎 Fork、Pull Request 和 Issue")
-        contribute_label.setFont(QFont("Microsoft YaHei", 11))
-        contribute_label.setAlignment(Qt.AlignCenter)
-        contribute_label.setStyleSheet("color: #666666; margin-top: 5px;")
-        content_layout.addWidget(contribute_label)
-        
-        # 技术信息
-        tech_info = QLabel("基于 Python + PyQt5 开发\n使用 WMI 和 PowerShell 进行网络管理\n支持 Windows 10/11 系统")
-        tech_info.setFont(QFont("Microsoft YaHei", 9))
-        tech_info.setAlignment(Qt.AlignCenter)
-        tech_info.setStyleSheet("color: #888888; margin-top: 8px;")
-        content_layout.addWidget(tech_info)
-        
-        # 弹性空间
-        content_layout.addStretch()
-        
-        # 作者信息（移到最下面，降低醒目度）
-        author_label = QLabel("作者：Curtis Yan")
-        author_label.setFont(QFont("Microsoft YaHei", 9))
-        author_label.setAlignment(Qt.AlignCenter)
-        author_label.setStyleSheet("color: #999999; margin-top: 10px;")
-        content_layout.addWidget(author_label)
-        
-        # 添加内容布局到主布局
-        layout.addLayout(content_layout)
-        
-        # 关闭按钮
-        close_btn = QPushButton("关闭")
-        close_btn.clicked.connect(self.accept)
-        close_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2196F3;
-                color: white;
-                border: none;
-                padding: 8px 20px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #1976D2;
-            }
-        """)
-        close_btn.setFixedWidth(100)
-        
-        close_layout = QHBoxLayout()
-        close_layout.addStretch()
-        close_layout.addWidget(close_btn)
-        close_layout.addStretch()
-        
-        layout.addLayout(close_layout)
+            try:
+                pythoncom.CoInitialize()
+            except:
+                pass
+            self.progress_update.emit("正在初始化网络适配器模块...")
+            
+            # 创建适配器对象（延迟初始化）
+            adapter = NetworkAdapter(lazy_init=True)
+            self.progress_update.emit("正在进行系统健康检查...")
+            
+            # 进行健康检查
+            health = adapter.health_check()
+            if not health['wmi_available']:
+                self.finished.emit(False, "WMI服务不可用，请检查系统配置", None)
+                return
+            if not health['powershell_available']:
+                self.finished.emit(False, "PowerShell不可用，请检查系统配置", None)
+                return
+            
+            self.progress_update.emit("初始化完成")
+            self.finished.emit(True, "", adapter)
+            
+        except Exception as e:
+            error_msg = f"初始化失败: {str(e)}"
+            logging.error(error_msg)
+            self.finished.emit(False, error_msg, None)
+        finally:
+            try:
+                pythoncom.CoUninitialize()
+            except:
+                pass
 
 
 class WorkerThread(QThread):
     """后台工作线程，避免界面卡死"""
-    finished = pyqtSignal(bool, str, list)  # 添加适配器列表参数
-    progress_update = pyqtSignal(str)  # 进度更新信号
+    finished = pyqtSignal(bool, str, list)
+    progress_update = pyqtSignal(str)
     
     def __init__(self, settings, adapter, adapter_name, speed_duplex):
         super().__init__()
@@ -252,24 +110,27 @@ class WorkerThread(QThread):
         self.speed_duplex = speed_duplex
     
     def run(self):
+        # 每个线程必须初始化COM
         try:
+            try:
+                pythoncom.CoInitialize()
+            except:
+                pass
+            
             logging.info(f"开始应用网络设置: {self.adapter_name} -> {self.speed_duplex}")
-            # 第一步：应用设置
             self.progress_update.emit("正在应用网络设置...")
+            
             success, message = self.settings.set_adapter_speed_duplex(
                 self.adapter_name, self.speed_duplex)
             
             if success:
                 logging.info("网络设置应用成功，等待网络适配器重新初始化")
-                # 等待网络适配器重新初始化（网络设置更改后需要时间）
                 self.progress_update.emit("等待网络适配器重新初始化...")
                 import time
-                time.sleep(3)  # 等待3秒让适配器完全重新初始化
+                time.sleep(2)  # 减少等待时间
                 
-                # 设置应用成功，获取更新后的状态
                 logging.info("网络设置应用成功，获取更新状态")
                 try:
-                    # 获取当前适配器的最新状态
                     updated_status = self.settings.get_current_speed_duplex(self.adapter_name)
                     self.finished.emit(True, message, [{'adapter_name': self.adapter_name, 'new_status': updated_status}])
                 except Exception as status_error:
@@ -282,19 +143,29 @@ class WorkerThread(QThread):
         except Exception as e:
             logging.error(f"操作异常: {str(e)}")
             self.finished.emit(False, f"操作失败: {str(e)}", [])
+        finally:
+            try:
+                pythoncom.CoUninitialize()
+            except:
+                pass
 
 
 class RefreshThread(QThread):
     """刷新适配器的后台线程"""
-    finished = pyqtSignal(bool, str, list)  # 成功标志，错误信息，适配器列表
-    progress_update = pyqtSignal(str)  # 进度更新信号
+    finished = pyqtSignal(bool, str, list)
+    progress_update = pyqtSignal(str)
     
     def __init__(self, adapter):
         super().__init__()
         self.adapter = adapter
     
     def run(self):
+        # 每个线程必须初始化COM
         try:
+            try:
+                pythoncom.CoInitialize()
+            except:
+                pass
             logging.info("开始刷新适配器列表")
             self.progress_update.emit("正在刷新适配器列表...")
             adapters = self.adapter.get_all_adapters()
@@ -304,31 +175,234 @@ class RefreshThread(QThread):
             error_msg = f"刷新适配器失败: {str(e)}"
             logging.error(error_msg)
             self.finished.emit(False, error_msg, [])
+        finally:
+            try:
+                pythoncom.CoUninitialize()
+            except:
+                pass
 
 
 class NetworkAdapterGUI(QMainWindow):
     def __init__(self):
-        super().__init__()
-        self.adapter = NetworkAdapter()
-        self.settings = NetworkSettings()
-        self.current_adapters = []
-        self.worker_thread = None
-        self.refresh_thread = None
-        self.log_visible = False  # 日志区域是否可见
+        try:
+            print("Initializing NetworkAdapterGUI...")
+            super().__init__()
+            
+            # 初始化变量
+            print("Setting up variables...")
+            self.adapter = None
+            self.settings = NetworkSettings()
+            self.current_adapters = []
+            self.worker_thread = None
+            self.refresh_thread = None
+            self.init_thread = None
+            self.log_visible = False
+            self.initialization_complete = False
+            # 动态刷新状态
+            self._dynamic_refresh_active = False
+            self._dynamic_target_alias = None
+            self._dynamic_target_value = None
+            self._dynamic_attempt_idx = 0
+            # 延后提示相关
+            self._pending_success_message = None
+            print("Variables initialized successfully")
+            
+            # 先初始化UI
+            print("Initializing UI...")
+            self.init_ui()
+            print("UI initialized successfully")
+            
+            # 设置日志回调
+            print("Setting up logging...")
+            gui_log_handler.set_gui_callback(self.append_log_message)
+            
+            logging.info(f"程序启动 - 管理员模式: {self.settings.is_admin}")
+            logging.info("网络适配器管理工具已启动")
+            
+            # 显示启动状态
+            print("Setting up initial state...")
+            self.statusBar().showMessage("正在初始化...")
+            self.refresh_btn.setEnabled(False)
+            self.apply_btn.setEnabled(False)
+            
+            # 检查管理员权限：若无管理员，直接静默提权重启并退出当前进程
+            if not self.settings.is_admin:
+                QTimer.singleShot(50, lambda: self.restart_as_admin(silent=True))
+                return
+            
+            # 启动后台初始化
+            print("Starting background initialization...")
+            self.start_initialization()
+            print("NetworkAdapterGUI initialization completed")
+            
+        except Exception as e:
+            print(f"ERROR in NetworkAdapterGUI.__init__(): {e}")
+            import traceback
+            traceback.print_exc()
+            raise
+    
+    def closeEvent(self, event):
+        """程序关闭时清理资源"""
+        try:
+            # 停止所有后台线程
+            threads_to_stop = [
+                ('worker_thread', self.worker_thread),
+                ('refresh_thread', self.refresh_thread), 
+                ('init_thread', self.init_thread)
+            ]
+            
+            for thread_name, thread_obj in threads_to_stop:
+                if thread_obj and thread_obj.isRunning():
+                    print(f"Stopping {thread_name}...")
+                    thread_obj.quit()
+                    if not thread_obj.wait(3000):  # 等待3秒
+                        print(f"Warning: {thread_name} did not stop gracefully")
+                        thread_obj.terminate()
+            
+            # 清理WMI连接
+            if self.adapter:
+                try:
+                    if hasattr(self.adapter, 'wmi_conn') and self.adapter.wmi_conn:
+                        self.adapter.wmi_conn = None
+                except:
+                    pass
+            
+            print("Resource cleanup completed")
+            event.accept()
+            
+        except Exception as e:
+            print(f"Error during cleanup: {e}")
+            event.accept()
+    
+    def start_initialization(self):
+        """启动后台初始化"""
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 0)  # 无限进度条
         
-        self.init_ui()
+        self.init_thread = InitializationThread()
+        self.init_thread.finished.connect(self.on_initialization_finished)
+        self.init_thread.progress_update.connect(self.on_progress_update)
+        self.init_thread.start()
+    
+    def on_initialization_finished(self, success, error_msg, adapter):
+        """初始化完成处理"""
+        self.progress_bar.setVisible(False)
         
-        # 设置日志回调
-        gui_log_handler.set_gui_callback(self.append_log_message)
-        
-        logging.info(f"程序启动 - 管理员模式: {self.settings.is_admin}")
-        logging.info("网络适配器管理工具已启动")
-        
-        # 如果不是管理员，自动以管理员身份重启
-        if not self.settings.is_admin:
-            self.auto_restart_as_admin()
+        if success:
+            self.adapter = adapter
+            self.initialization_complete = True
+            self.refresh_btn.setEnabled(True)
+            self.apply_btn.setEnabled(True)
+            self.statusBar().showMessage("初始化完成 - 就绪")
+            
+            # 自动刷新适配器列表
+            QTimer.singleShot(500, self.refresh_adapters)
+            
         else:
-            self.refresh_adapters()
+            logging.error(f"初始化失败: {error_msg}")
+            self.statusBar().showMessage("初始化失败")
+            
+            # 如果是WMI/权限相关问题且不是管理员，直接静默提权重启
+            if ("WMI" in error_msg or "权限" in error_msg) and not self.settings.is_admin:
+                self.restart_as_admin(silent=True)
+                return
+            
+            # 其他错误：提供详细诊断信息
+            try:
+                compatibility = SystemCompatibility()
+                report = compatibility.get_compatibility_report()
+                
+                # 构建详细错误信息
+                detailed_msg = f"初始化失败: {error_msg}\n\n"
+                detailed_msg += "系统诊断信息:\n"
+                detailed_msg += f"• PowerShell: {'可用' if report['powershell']['available'] else '不可用'}\n"
+                detailed_msg += f"• WMI: {'可用' if report['wmi']['available'] else '不可用'}\n"
+                detailed_msg += f"• 管理员权限: {'是' if report['system_info'].get('is_admin', False) else '否'}\n"
+                
+                if report['recommendations']:
+                    detailed_msg += "\n建议:\n"
+                    for i, rec in enumerate(report['recommendations'][:3], 1):  # 只显示前3个建议
+                        detailed_msg += f"{i}. {rec}\n"
+                
+                detailed_msg += "\n是否要重试？"
+                
+                reply = QMessageBox.critical(self, "初始化失败", detailed_msg,
+                                           QMessageBox.Retry | QMessageBox.Close)
+            except Exception:
+                # 如果兼容性检查也失败，使用简单错误信息
+                reply = QMessageBox.critical(self, "初始化失败", 
+                                           f"{error_msg}\n\n是否要重试？",
+                                           QMessageBox.Retry | QMessageBox.Close)
+            
+            if reply == QMessageBox.Retry:
+                QTimer.singleShot(1000, self.start_initialization)
+            else:
+                self.close()
+    
+    def show_admin_warning(self):
+        """显示管理员权限警告，提供自动重启选项"""
+        if not self.settings.is_admin:
+            reply = QMessageBox.question(
+                self, 
+                "需要管理员权限", 
+                "网络适配器管理需要管理员权限才能正常工作。\n\n"
+                "没有管理员权限将无法：\n"
+                "• 获取网络适配器信息\n"
+                "• 修改网络设置\n"
+                "• 查看详细状态\n\n"
+                "是否要以管理员身份重新启动程序？",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes  # 默认选择Yes
+            )
+            
+            if reply == QMessageBox.Yes:
+                self.restart_as_admin()
+            else:
+                # 用户选择继续，但功能受限
+                self.statusBar().showMessage("功能受限模式 - 建议以管理员身份运行")
+    
+    def restart_as_admin(self, silent: bool = False):
+        """以管理员身份重启程序。
+        silent=True 时不弹窗，尽量使用 pythonw.exe 以避免命令行窗口。
+        """
+        try:
+            import ctypes
+            import sys
+            
+            # 获取当前程序路径
+            if getattr(sys, 'frozen', False):
+                # 如果是打包后的exe文件
+                current_exe = sys.executable
+                args = None
+            else:
+                # 如果是Python脚本
+                # 优先使用 pythonw.exe 避免命令行窗口
+                pyexe = sys.executable
+                pywexe = os.path.join(os.path.dirname(pyexe), 'pythonw.exe')
+                current_exe = pywexe if os.path.exists(pywexe) else pyexe
+                script_path = os.path.abspath(__file__)
+                args = f'"{script_path}"'
+            
+            # 关闭当前程序
+            self.close()
+            QApplication.processEvents()
+            
+            # 使用ShellExecuteW以管理员身份启动
+            # 显示状态：0隐藏窗口，1正常显示
+            show_cmd = 0 if (not getattr(sys, 'frozen', False)) else 1
+            ctypes.windll.shell32.ShellExecuteW(
+                None, "runas", current_exe, args, None, show_cmd
+            )
+            
+            # 退出当前程序
+            QApplication.quit()
+            sys.exit(0)
+            
+        except Exception as e:
+            if not silent:
+                # 如果启动失败，显示错误
+                QMessageBox.critical(self, "错误", f"无法以管理员身份启动程序: {str(e)}")
+                self.show()
     
     def init_ui(self):
         """初始化用户界面"""
@@ -337,12 +411,35 @@ class NetworkAdapterGUI(QMainWindow):
         self.setMaximumWidth(500)
         self.resize(500, 600)
         
-        # 设置窗口和任务栏图标
+        # 创建菜单栏
+        menubar = self.menuBar()
+        
+        # 帮助菜单
+        help_menu = menubar.addMenu('帮助')
+        
+        # 系统诊断动作
+        system_diag_action = help_menu.addAction('系统诊断')
+        system_diag_action.triggered.connect(self.show_system_diagnosis)
+        
+        # 关于动作
+        about_action = help_menu.addAction('关于')
+        about_action.triggered.connect(self.show_about)
+        
+        # 设置窗口图标
         try:
-            icon_path = os.path.join(os.path.dirname(__file__), "img", "NA.ico")
-            if os.path.exists(icon_path):
-                from PyQt5.QtGui import QIcon
-                self.setWindowIcon(QIcon(icon_path))
+            # 支持多种部署方式的资源路径查找
+            possible_paths = [
+                os.path.join(os.path.dirname(__file__), "img", "NA.ico"),  # 源码运行
+                os.path.join(os.path.dirname(os.path.abspath(__file__)), "img", "NA.ico"),  # 绝对路径
+                os.path.join(os.getcwd(), "img", "NA.ico"),  # 当前工作目录
+                "img/NA.ico",  # 相对路径
+                "NA.ico"  # 同目录
+            ]
+            
+            for icon_path in possible_paths:
+                if os.path.exists(icon_path):
+                    self.setWindowIcon(QIcon(icon_path))
+                    break
         except Exception as e:
             logging.warning(f"加载窗口图标失败: {str(e)}")
         
@@ -358,25 +455,35 @@ class NetworkAdapterGUI(QMainWindow):
         header_layout = QVBoxLayout()
         header_layout.setSpacing(10)
         
-        # NA（蓝透明）图片
+        # Logo
         logo_label = QLabel()
         logo_label.setAlignment(Qt.AlignCenter)
         try:
-            logo_path = os.path.join(os.path.dirname(__file__), "img", "NA (蓝透明).jpg")
-            if os.path.exists(logo_path):
-                pixmap = QPixmap(logo_path)
-                if not pixmap.isNull():
-                    # 调整图片大小，让它更突出
-                    scaled_pixmap = pixmap.scaled(120, 120, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                    logo_label.setPixmap(scaled_pixmap)
-                    logo_label.setStyleSheet("margin: 15px 0;")
-                else:
-                    raise ValueError("图片加载失败")
-            else:
-                raise FileNotFoundError("Logo文件不存在")
-        except (FileNotFoundError, ValueError, OSError):
-            # Logo加载失败时使用文字标识
-            logo_label.setText("")
+            # 支持多种部署方式的Logo路径查找
+            possible_logo_paths = [
+                os.path.join(os.path.dirname(__file__), "img", "NA (蓝透明).jpg"),  # 源码运行
+                os.path.join(os.path.dirname(os.path.abspath(__file__)), "img", "NA (蓝透明).jpg"),  # 绝对路径
+                os.path.join(os.getcwd(), "img", "NA (蓝透明).jpg"),  # 当前工作目录
+                "img/NA (蓝透明).jpg",  # 相对路径
+                "NA (蓝透明).jpg"  # 同目录
+            ]
+            
+            logo_loaded = False
+            for logo_path in possible_logo_paths:
+                if os.path.exists(logo_path):
+                    pixmap = QPixmap(logo_path)
+                    if not pixmap.isNull():
+                        scaled_pixmap = pixmap.scaled(120, 120, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                        logo_label.setPixmap(scaled_pixmap)
+                        logo_label.setStyleSheet("margin: 15px 0;")
+                        logo_loaded = True
+                        break
+            
+            if not logo_loaded:
+                raise Exception("未找到Logo文件")
+        except Exception:
+            # 使用文本作为备用Logo
+            logo_label.setText("🔧")
             logo_label.setFont(QFont("", 48))
             logo_label.setStyleSheet("color: #2196F3; margin: 15px 0;")
         
@@ -400,12 +507,23 @@ class NetworkAdapterGUI(QMainWindow):
         
         self.adapter_combo = QComboBox()
         self.adapter_combo.currentTextChanged.connect(self.on_adapter_changed)
-        self.adapter_combo.setMinimumHeight(35)  # 增大高度
-        self.adapter_combo.setStyleSheet("QComboBox { font-size: 12px; padding: 5px; } QComboBox::drop-down { width: 25px; } QComboBox QAbstractItemView { min-width: 400px; }")
+        self.adapter_combo.setMinimumHeight(35)
+        self.adapter_combo.setStyleSheet("QComboBox { font-size: 12px; padding: 5px; }")
+        self.adapter_combo.addItem("正在初始化...")
+        self.adapter_combo.setEnabled(False)
         adapter_layout.addWidget(self.adapter_combo)
         
+        # 仅显示有线网卡开关（默认开启）
+        wired_only_layout = QHBoxLayout()
+        self.wired_only_checkbox = QCheckBox("仅显示有线网卡")
+        self.wired_only_checkbox.setChecked(True)
+        self.wired_only_checkbox.stateChanged.connect(lambda _: self.update_adapter_list(self.current_adapters))
+        wired_only_layout.addWidget(self.wired_only_checkbox)
+        wired_only_layout.addStretch()
+        adapter_layout.addLayout(wired_only_layout)
+        
         # 当前状态显示
-        self.status_label = QLabel("当前状态: 未选择适配器")
+        self.status_label = QLabel("当前状态: 正在初始化")
         adapter_layout.addWidget(self.status_label)
         
         main_layout.addWidget(adapter_group)
@@ -414,13 +532,14 @@ class NetworkAdapterGUI(QMainWindow):
         settings_group = QGroupBox("网络设置")
         settings_layout = QVBoxLayout(settings_group)
         
-        # 速度双工设置（合并为一个选项）
+        # 速度双工设置
         speed_duplex_layout = QHBoxLayout()
         speed_duplex_layout.addWidget(QLabel("速度和双工:"))
         self.speed_duplex_combo = QComboBox()
-        # 初始化时不添加任何选项，等待适配器选择后再更新
-        self.speed_duplex_combo.setMinimumHeight(35)  # 增大高度
-        self.speed_duplex_combo.setStyleSheet("QComboBox { font-size: 12px; padding: 5px; } QComboBox::drop-down { width: 25px; } QComboBox QAbstractItemView { min-width: 250px; }")
+        self.speed_duplex_combo.setMinimumHeight(35)
+        self.speed_duplex_combo.setStyleSheet("QComboBox { font-size: 12px; padding: 5px; }")
+        self.speed_duplex_combo.addItem("请等待初始化完成")
+        self.speed_duplex_combo.setEnabled(False)
         speed_duplex_layout.addWidget(self.speed_duplex_combo)
         settings_layout.addLayout(speed_duplex_layout)
         
@@ -428,32 +547,27 @@ class NetworkAdapterGUI(QMainWindow):
         
         # 按钮组
         button_layout = QHBoxLayout()
-        button_layout.setSpacing(10)  # 设置统一间距
+        button_layout.setSpacing(10)
         
         self.refresh_btn = QPushButton("刷新")
         self.refresh_btn.clicked.connect(self.refresh_adapters)
         self.refresh_btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; font-weight: bold; }")
         self.refresh_btn.setMinimumWidth(160)
+        self.refresh_btn.setEnabled(False)
         button_layout.addWidget(self.refresh_btn)
         
         self.apply_btn = QPushButton("应用设置")
         self.apply_btn.clicked.connect(self.apply_settings)
         self.apply_btn.setStyleSheet("QPushButton { background-color: #2196F3; color: white; font-weight: bold; }")
         self.apply_btn.setMinimumWidth(160)
+        self.apply_btn.setEnabled(False)
         button_layout.addWidget(self.apply_btn)
         
-        # 添加弹性空间，将右侧按钮推到右边
         button_layout.addStretch()
         
-        # 创建右侧按钮子布局，控制间距
+        # 右侧按钮
         right_button_layout = QHBoxLayout()
-        right_button_layout.setSpacing(5)  # 设置较小间距
-        
-        self.about_btn = QPushButton("关于")
-        self.about_btn.clicked.connect(self.show_about)
-        self.about_btn.setMinimumWidth(70)
-        self.about_btn.setMaximumWidth(70)
-        right_button_layout.addWidget(self.about_btn)
+        right_button_layout.setSpacing(5)
         
         self.log_btn = QPushButton("显示日志")
         self.log_btn.clicked.connect(self.toggle_log_display)
@@ -461,9 +575,7 @@ class NetworkAdapterGUI(QMainWindow):
         self.log_btn.setMaximumWidth(70)
         right_button_layout.addWidget(self.log_btn)
         
-        # 将右侧按钮布局添加到主布局
         button_layout.addLayout(right_button_layout)
-        
         main_layout.addLayout(button_layout)
         
         # 日志显示区域
@@ -488,28 +600,21 @@ class NetworkAdapterGUI(QMainWindow):
         main_layout.addWidget(self.progress_bar)
         
         # 状态栏
-        if self.settings.is_admin:
-            self.statusBar().showMessage("就绪 - 管理员模式")
-        else:
-            self.statusBar().showMessage("就绪 - 普通用户模式（修改设置需要提权）")
+        self.statusBar().showMessage("正在启动...")
     
     def toggle_log_display(self):
         """切换日志显示状态"""
         if self.log_visible:
-            # 隐藏日志
             self.log_widget.setVisible(False)
             self.log_btn.setText("显示日志")
             self.resize(500, 600)
             self.log_visible = False
         else:
-            # 显示日志
             self.log_widget.setVisible(True)
             self.log_btn.setText("隐藏日志")
-            # 加载所有历史日志
             all_logs = gui_log_handler.get_all_logs()
             if all_logs:
                 self.log_widget.setPlainText(all_logs)
-                # 滚动到底部
                 cursor = self.log_widget.textCursor()
                 cursor.movePosition(cursor.End)
                 self.log_widget.setTextCursor(cursor)
@@ -520,352 +625,512 @@ class NetworkAdapterGUI(QMainWindow):
         """实时添加日志消息"""
         if self.log_visible:
             self.log_widget.append(message)
-            # 自动滚动到底部
             cursor = self.log_widget.textCursor()
             cursor.movePosition(cursor.End)
             self.log_widget.setTextCursor(cursor)
     
     def refresh_adapters(self):
-        """刷新适配器列表（多线程）"""
-        # 如果已有刷新线程在运行，先停止它
+        """刷新适配器列表"""
+        if not self.initialization_complete or not self.adapter:
+            QMessageBox.warning(self, "警告", "请等待初始化完成")
+            return
+        
         if self.refresh_thread and self.refresh_thread.isRunning():
             logging.info("停止当前刷新线程")
             self.refresh_thread.quit()
             self.refresh_thread.wait()
         
-        # 禁用刷新按钮，显示进度
         self.refresh_btn.setEnabled(False)
         self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, 0)  # 无限进度条
+        self.progress_bar.setRange(0, 0)
         
-        # 启动刷新线程
         logging.info("启动刷新适配器线程")
         self.refresh_thread = RefreshThread(self.adapter)
         self.refresh_thread.finished.connect(self.on_refresh_finished)
         self.refresh_thread.progress_update.connect(self.on_progress_update)
         self.refresh_thread.start()
     
-    def update_adapter_list(self, adapters):
-        """更新适配器列表显示"""
-        # 保存当前选中的适配器
-        current_selection = self.adapter_combo.currentText()
-        
-        self.current_adapters = adapters
-        self.adapter_combo.clear()
-        self.adapter_combo.setEnabled(True)  # 确保下拉框可用
-        
-        if self.current_adapters:
-            for adapter in self.current_adapters:
-                # 显示设备名，内部保存接口别名（InterfaceAlias）
-                self.adapter_combo.addItem(adapter['name'], userData=adapter.get('alias'))
-            
-            # 尝试恢复之前的选择
-            if current_selection and current_selection not in ["请点击刷新按钮重试", "请先刷新适配器"]:
-                index = self.adapter_combo.findText(current_selection)
-                if index >= 0:
-                    self.adapter_combo.setCurrentIndex(index)
-            
-            self.statusBar().showMessage(f"找到 {len(self.current_adapters)} 个适配器")
-        else:
-            self.adapter_combo.addItem("未找到可用的网络适配器")
-            self.statusBar().showMessage("未找到可用的网络适配器")
-            self.status_label.setText("当前状态: 未找到适配器")
-    
-    def on_adapter_changed(self):
-        """适配器选择改变时的处理"""
-        current_text = self.adapter_combo.currentText()
-        current_alias = self.adapter_combo.currentData()
-        if not current_text:
-            return
-        
-        # 找到对应的适配器信息并获取实际的速度双工设置
-        for adapter in self.current_adapters:
-            if adapter['name'] == current_text:
-                # 获取实际的速度双工设置
-                alias = current_alias or adapter.get('alias') or adapter['name']
-                actual_speed_duplex = self.settings.get_current_speed_duplex(alias)
-                status_text = (f"当前状态: {actual_speed_duplex} | "
-                             f"IP: {adapter['ip_address']}")
-                self.status_label.setText(status_text)
-                
-                # 更新下拉菜单选项为当前适配器支持的选项
-                self.update_speed_duplex_options(alias)
-                break
-    
-    def show_admin_prompt(self):
-        """显示管理员权限提示"""
-        reply = QMessageBox.question(self, "需要管理员权限", 
-                                   "此程序需要管理员权限才能正常工作\n\n"
-                                   "是否要以管理员身份重新启动程序？",
-                                   QMessageBox.Yes | QMessageBox.No)
-        if reply == QMessageBox.Yes:
-            # 立即隐藏窗口，避免用户看到两个窗口
-            self.hide()
-            self.restart_as_admin()
-        else:
-            # 用户选择不以管理员身份运行，关闭程序
-            self.close()
-    
-    def apply_settings(self):
-        """应用网络设置"""
-        if not self.adapter_combo.currentText():
-            QMessageBox.warning(self, "警告", "请先选择一个网络适配器")
-            return
-        
-        if not self.settings.is_admin:
-            self.show_admin_prompt()
-            return
-        
-        # 获取设置值
-        adapter_name = self.adapter_combo.currentText()  # 显示用途
-        adapter_alias = self.adapter_combo.currentData() or adapter_name
-        speed_duplex = self.speed_duplex_combo.currentText()
-        
-        # 确认对话框
-        reply = QMessageBox.question(self, "确认操作", 
-                                   f"确定要修改适配器 '{adapter_name}' 的设置吗?\n\n"
-                                   f"速度和双工模式: {speed_duplex}",
-                                   QMessageBox.Yes | QMessageBox.No)
-        
-        if reply == QMessageBox.Yes:
-            # 后台操作用别名，以确保 PowerShell -Name 匹配接口别名
-            self.start_operation(adapter_alias, speed_duplex)
-    
-    def start_operation(self, adapter_name, speed_duplex):
-        """启动后台操作"""
-        self.apply_btn.setEnabled(False)
-        self.refresh_btn.setEnabled(False)  # 禁用刷新按钮
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, 0)  # 无限进度条
-        self.statusBar().showMessage("正在应用设置...")
-        
-        # 启动工作线程
-        self.worker_thread = WorkerThread(self.settings, self.adapter, adapter_name, speed_duplex)
-        self.worker_thread.finished.connect(self.on_operation_finished)
-        self.worker_thread.progress_update.connect(self.on_progress_update)
-        self.worker_thread.start()
-    
-    def update_speed_duplex_options(self, adapter_alias: str):
-        """更新速度双工选项为当前适配器支持的选项"""
-        if not adapter_alias or not adapter_alias.strip():
-            self.speed_duplex_combo.clear()
-            self.speed_duplex_combo.addItem("请先选择适配器")
-            return
-            
-        try:
-            # 获取当前选中的值
-            current_selection = self.speed_duplex_combo.currentText()
-            
-            # 获取适配器支持的选项
-            options = self.adapter.get_speed_duplex_options(adapter_alias)
-            
-            # 更新下拉菜单
-            self.speed_duplex_combo.clear()
-            self.speed_duplex_combo.setEnabled(True)  # 确保下拉框可用
-            
-            if options:
-                self.speed_duplex_combo.addItems(options)
-                # 尝试恢复之前的选择
-                if current_selection in options:
-                    self.speed_duplex_combo.setCurrentText(current_selection)
-                elif options:
-                    self.speed_duplex_combo.setCurrentIndex(0)
-            else:
-                # 如果没有获取到选项，添加一个提示但保持可用
-                self.speed_duplex_combo.addItem("无可用选项 - 请检查适配器")
-                
-        except Exception as e:
-            logging.warning(f"更新速度双工选项失败: {str(e)}")
-            self.speed_duplex_combo.clear()
-            self.speed_duplex_combo.setEnabled(True)  # 保持可用
-            self.speed_duplex_combo.addItem("获取选项失败 - 请重试")
-    
     def on_refresh_finished(self, success, error_msg, adapters):
-        """刷新完成的处理"""
-        # 恢复界面状态
+        """刷新完成处理"""
         self.refresh_btn.setEnabled(True)
         self.progress_bar.setVisible(False)
         
         if success:
             logging.info("刷新适配器成功")
             self.update_adapter_list(adapters)
+            # 若存在动态刷新序列，检查是否需要继续
+            self._maybe_continue_dynamic_refresh()
         else:
             logging.error(f"刷新适配器失败: {error_msg}")
-            self.statusBar().showMessage("刷新失败 - 点击刷新按钮重试")
+            self.statusBar().showMessage("刷新失败")
+            # 自动重试一次：先尝试重连WMI，然后延时重新刷新
+            try:
+                if self.adapter:
+                    self.adapter.reconnect_wmi()
+            except Exception as e:
+                logging.warning(f"重连WMI失败: {e}")
             
-            # 显示错误对话框，并提供重试选项
-            reply = QMessageBox.question(self, "刷新失败", 
-                                       f"{error_msg}\n\n是否要重试？",
-                                       QMessageBox.Yes | QMessageBox.No)
-            if reply == QMessageBox.Yes:
-                # 重试刷新
+            def retry_once():
+                logging.info("自动重试刷新适配器...")
                 self.refresh_adapters()
+            QTimer.singleShot(800, retry_once)
+            
+            # 同时提示用户本次失败，但会自动重试
+            QMessageBox.information(self, "正在重试", f"刷新失败，将自动重试一次。\n\n原因: {error_msg}")
+
+    def _maybe_continue_dynamic_refresh(self):
+        """在动态刷新序列中，根据当前设置是否已生效决定是否继续下一次刷新。"""
+        if not self._dynamic_refresh_active:
+            return
+        alias = self._dynamic_target_alias
+        target = self._dynamic_target_value
+        if not alias or not target:
+            # 无法判断，终止序列
+            self._dynamic_refresh_active = False
+            return
+        try:
+            current = self.settings.get_current_speed_duplex(alias)
+        except Exception as e:
+            logging.warning(f"检查当前速度双工失败: {e}")
+            current = None
+        
+        # 对比是否已达成目标（去除首尾空格）
+        if current and target and current.strip() == target.strip():
+            self.statusBar().showMessage("设置已生效")
+            self._dynamic_refresh_active = False
+            # 刷新确认成功后再弹窗提示
+            if self._pending_success_message:
+                QMessageBox.information(self, "成功", self._pending_success_message)
+                self._pending_success_message = None
+            return
+        
+        # 尚未生效，继续下一次刷新（两档：800ms -> 1500ms）
+        if self._dynamic_attempt_idx == 0:
+            # 第二次：+1500ms（兜底）
+            self._dynamic_attempt_idx = 1
+            QTimer.singleShot(1500, self.refresh_adapters)
+            self.statusBar().showMessage("最后一次刷新以确认设置...")
+        else:
+            # 两次之后仍未变化，结束并给出提示
+            self._dynamic_refresh_active = False
+            self.statusBar().showMessage("设置可能未立即生效，可稍后手动刷新或尝试重启适配器")
+            # 不弹出成功提示，避免误导；清理待提示信息
+            self._pending_success_message = None
+    
+    def update_adapter_list(self, adapters):
+        """更新适配器列表显示"""
+        current_selection = self.adapter_combo.currentText()
+        
+        self.current_adapters = adapters or []
+        self.adapter_combo.clear()
+        self.adapter_combo.setEnabled(True)
+        
+        # 根据开关过滤无线网卡（名称包含 Wireless 或 Wi-Fi 或 WLAN 等常见关键字）
+        def is_wireless(name: str) -> bool:
+            if not name:
+                return False
+            low = name.lower()
+            return ('wireless' in low) or ('wi-fi' in low) or ('wifi' in low) or ('wlan' in low)
+        
+        show_wired_only = getattr(self, 'wired_only_checkbox', None) and self.wired_only_checkbox.isChecked()
+        filtered = []
+        for a in self.current_adapters:
+            if show_wired_only and is_wireless(a.get('name', '')):
+                continue
+            filtered.append(a)
+        
+        if filtered:
+            for adapter in filtered:
+                self.adapter_combo.addItem(adapter['name'], userData=adapter.get('alias'))
+            
+            if current_selection and current_selection not in ["正在初始化...", "请等待初始化完成"]:
+                index = self.adapter_combo.findText(current_selection)
+                if index >= 0:
+                    self.adapter_combo.setCurrentIndex(index)
+            
+            self.statusBar().showMessage(f"找到 {len(filtered)} 个适配器")
+        else:
+            self.adapter_combo.addItem("未找到可用的网络适配器")
+            self.statusBar().showMessage("未找到可用的网络适配器")
+    
+    def on_adapter_changed(self):
+        """适配器选择改变处理"""
+        if not self.initialization_complete:
+            return
+            
+        current_text = self.adapter_combo.currentText()
+        current_alias = self.adapter_combo.currentData()
+        
+        if not current_text or not self.current_adapters:
+            return
+        
+        for adapter in self.current_adapters:
+            if adapter['name'] == current_text:
+                alias = current_alias or adapter.get('alias') or adapter['name']
+                actual_speed_duplex = self.settings.get_current_speed_duplex(alias)
+                status_text = (f"当前状态: {actual_speed_duplex} | "
+                             f"IP: {adapter['ip_address']}")
+                self.status_label.setText(status_text)
+                self.update_speed_duplex_options(alias)
+                break
+    
+    def update_speed_duplex_options(self, adapter_alias: str):
+        """更新速度双工选项"""
+        if not adapter_alias or not adapter_alias.strip():
+            self.speed_duplex_combo.clear()
+            self.speed_duplex_combo.addItem("请先选择适配器")
+            return
+        
+        try:
+            current_selection = self.speed_duplex_combo.currentText()
+            options = self.adapter.get_speed_duplex_options(adapter_alias, use_fallback=True)
+            
+            self.speed_duplex_combo.clear()
+            self.speed_duplex_combo.setEnabled(True)
+            
+            if options:
+                self.speed_duplex_combo.addItems(options)
+                if current_selection in options:
+                    self.speed_duplex_combo.setCurrentText(current_selection)
+                else:
+                    self.speed_duplex_combo.setCurrentIndex(0)
             else:
-                # 用户选择不重试，保持界面可用状态
-                self.adapter_combo.clear()
-                self.adapter_combo.addItem("请点击刷新按钮重试")
-                self.speed_duplex_combo.clear()
-                self.speed_duplex_combo.addItem("请先刷新适配器")
-                self.status_label.setText("当前状态: 刷新失败")
+                self.speed_duplex_combo.addItem("无可用选项")
+                
+        except Exception as e:
+            logging.warning(f"更新速度双工选项失败: {str(e)}")
+            self.speed_duplex_combo.clear()
+            self.speed_duplex_combo.addItem("获取选项失败")
+    
+    def apply_settings(self):
+        """应用网络设置"""
+        if not self.initialization_complete:
+            QMessageBox.warning(self, "警告", "请等待初始化完成")
+            return
+            
+        if not self.adapter_combo.currentText():
+            QMessageBox.warning(self, "警告", "请先选择一个网络适配器")
+            return
+        
+        if not self.settings.is_admin:
+            QMessageBox.warning(self, "权限不足", "需要管理员权限才能修改网络设置")
+            return
+        
+        adapter_name = self.adapter_combo.currentText()
+        adapter_alias = self.adapter_combo.currentData() or adapter_name
+        speed_duplex = self.speed_duplex_combo.currentText()
+        
+        reply = QMessageBox.question(self, "确认操作", 
+                                   f"确定要修改适配器 '{adapter_name}' 的设置吗?\n\n"
+                                   f"速度和双工模式: {speed_duplex}",
+                                   QMessageBox.Yes | QMessageBox.No)
+        
+        if reply == QMessageBox.Yes:
+            self.start_operation(adapter_alias, speed_duplex)
+    
+    def start_operation(self, adapter_name, speed_duplex):
+        """启动后台操作"""
+        self.apply_btn.setEnabled(False)
+        self.refresh_btn.setEnabled(False)
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 0)
+        self.statusBar().showMessage("正在应用设置...")
+        
+        self.worker_thread = WorkerThread(self.settings, self.adapter, adapter_name, speed_duplex)
+        self.worker_thread.finished.connect(self.on_operation_finished)
+        self.worker_thread.progress_update.connect(self.on_progress_update)
+        self.worker_thread.start()
+    
+    def on_operation_finished(self, success, message, status_data):
+        """操作完成处理"""
+        self.apply_btn.setEnabled(True)
+        self.refresh_btn.setEnabled(True)
+        self.progress_bar.setVisible(False)
+        
+        if success:
+            self.statusBar().showMessage("设置应用成功，正在刷新状态...")
+            # 延后弹窗：待刷新确认后再提示成功
+            self._pending_success_message = message
+            # 从 status_data 或按钮当前选择推断目标
+            selected_alias = self.adapter_combo.currentData() or self.adapter_combo.currentText()
+            target_value = self.speed_duplex_combo.currentText()
+            try:
+                if status_data and isinstance(status_data, list) and status_data:
+                    maybe = status_data[0]
+                    if isinstance(maybe, dict) and maybe.get('adapter_name'):
+                        selected_alias = maybe['adapter_name']
+                    if isinstance(maybe, dict) and maybe.get('new_status') and maybe['new_status'] != 'Unknown':
+                        target_value = maybe['new_status']
+            except Exception:
+                pass
+            
+            # 设置动态刷新状态
+            self._dynamic_refresh_active = True
+            self._dynamic_target_alias = selected_alias
+            self._dynamic_target_value = target_value
+            self._dynamic_attempt_idx = 0
+            
+            # 第一次刷新：800ms
+            QTimer.singleShot(800, self.refresh_adapters)
+        else:
+            self.statusBar().showMessage("设置应用失败")
+            QMessageBox.critical(self, "失败", message)
     
     def on_progress_update(self, message):
         """更新进度信息"""
         logging.info(f"进度更新: {message}")
         self.statusBar().showMessage(message)
     
-    def on_operation_finished(self, success, message, status_data):
-        """操作完成的处理"""
-        # 恢复界面状态
-        self.apply_btn.setEnabled(True)
-        self.refresh_btn.setEnabled(True)
-        self.progress_bar.setVisible(False)
-        
-        if success:
-            # 更新当前适配器的状态显示
-            if status_data and len(status_data) > 0:
-                adapter_name = status_data[0].get('adapter_name')
-                new_status = status_data[0].get('new_status')
-                if adapter_name and new_status:
-                    # 更新状态显示
-                    current_text = self.adapter_combo.currentText()
-                    if current_text == adapter_name or self.adapter_combo.currentData() == adapter_name:
-                        # 获取当前适配器的IP地址
-                        current_ip = "未知"
-                        for adapter in self.current_adapters:
-                            if adapter['name'] == current_text:
-                                current_ip = adapter['ip_address']
-                                break
-                        
-                        status_text = f"当前状态: {new_status} | IP: {current_ip}"
-                        self.status_label.setText(status_text)
-                        logging.info(f"状态已更新: {new_status}")
-            
-            self.statusBar().showMessage("设置应用成功")
-            QMessageBox.information(self, "成功", message)
-        else:
-            self.statusBar().showMessage("设置应用失败")
-            QMessageBox.critical(self, "失败", message)
-    
-    def restart_as_admin(self):
-        """以管理员身份重启程序"""
+    def show_system_diagnosis(self):
+        """显示系统诊断对话框"""
         try:
-            # 获取当前程序路径
-            if getattr(sys, 'frozen', False):
-                # 如果是打包后的exe文件
-                current_exe = sys.executable
-            else:
-                # 如果是Python脚本
-                current_exe = sys.executable
-                script_path = os.path.abspath(__file__)
+            compatibility = SystemCompatibility()
+            report = compatibility.get_compatibility_report()
             
-            # 立即关闭当前程序，避免两个窗口同时存在
-            self.close()
-            QApplication.processEvents()  # 处理关闭事件
+            # 构建诊断报告文本
+            diag_text = "系统兼容性诊断报告\n"
+            diag_text += "=" * 40 + "\n\n"
             
-            # 使用ShellExecuteW以管理员身份启动
-            if getattr(sys, 'frozen', False):
-                # 打包后的exe
-                ctypes.windll.shell32.ShellExecuteW(
-                    None, "runas", current_exe, None, None, 1
-                )
-            else:
-                # Python脚本
-                ctypes.windll.shell32.ShellExecuteW(
-                    None, "runas", current_exe, f'"{script_path}"', None, 1
-                )
+            # 系统信息
+            diag_text += "系统信息:\n"
+            sys_info = report['system_info']
+            diag_text += f"  平台: {sys_info.get('platform', 'Unknown')}\n"
+            diag_text += f"  Python版本: {sys_info.get('python_version', 'Unknown').split()[0]}\n"
+            diag_text += f"  管理员权限: {'是' if sys_info.get('is_admin', False) else '否'}\n\n"
             
-            # 退出当前程序
-            QApplication.quit()
-            sys.exit(0)
+            # PowerShell信息
+            diag_text += "PowerShell兼容性:\n"
+            ps_info = report['powershell']
+            diag_text += f"  可用性: {'是' if ps_info['available'] else '否'}\n"
+            if ps_info['available']:
+                diag_text += f"  路径: {ps_info['path']}\n"
+                diag_text += f"  版本: {ps_info['version']}\n"
+                diag_text += f"  执行策略: {ps_info['execution_policy']}\n"
+            diag_text += "\n"
+            
+            # WMI信息
+            diag_text += "WMI兼容性:\n"
+            wmi_info = report['wmi']
+            diag_text += f"  可用性: {'是' if wmi_info['available'] else '否'}\n"
+            diag_text += f"  服务运行: {'是' if wmi_info['service_running'] else '否'}\n"
+            if wmi_info['error']:
+                diag_text += f"  错误: {wmi_info['error']}\n"
+            diag_text += "\n"
+            
+            # 网络命令兼容性
+            diag_text += "网络命令兼容性:\n"
+            net_info = report['network_commands']
+            diag_text += f"  netsh: {'可用' if net_info['netsh_available'] else '不可用'}\n"
+            diag_text += f"  Get-NetAdapter: {'可用' if net_info['get_netadapter_available'] else '不可用'}\n"
+            diag_text += f"  wmic: {'可用' if net_info['wmic_available'] else '不可用'}\n\n"
+            
+            # 建议
+            if report['recommendations']:
+                diag_text += "建议:\n"
+                for i, rec in enumerate(report['recommendations'], 1):
+                    diag_text += f"  {i}. {rec}\n"
+            
+            # 创建对话框
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle("系统诊断")
+            msg_box.setText("系统兼容性诊断完成")
+            msg_box.setDetailedText(diag_text)
+            msg_box.setIcon(QMessageBox.Information)
+            
+            # 设置对话框大小，让详细信息区域更大
+            msg_box.resize(800, 600)
+            
+            # 查找详细文本区域并设置最小大小
+            for widget in msg_box.findChildren(QTextEdit):
+                widget.setMinimumSize(750, 400)
+                widget.setMaximumSize(750, 400)
+            
+            msg_box.exec_()
             
         except Exception as e:
-            # 如果启动失败，显示窗口并提示错误
-            self.show()
-            QMessageBox.critical(self, "错误", f"无法以管理员身份启动程序: {str(e)}")
-    
-    def auto_restart_as_admin(self):
-        """自动以管理员身份重启程序"""
-        try:
-            # 获取当前程序路径
-            if getattr(sys, 'frozen', False):
-                # 如果是打包后的exe文件
-                current_exe = sys.executable
-            else:
-                # 如果是Python脚本
-                current_exe = sys.executable
-                script_path = os.path.abspath(__file__)
-            
-            # 立即关闭当前程序，避免两个窗口同时存在
-            self.close()
-            QApplication.processEvents()  # 处理关闭事件
-            
-            # 使用ShellExecuteW以管理员身份启动
-            if getattr(sys, 'frozen', False):
-                # 打包后的exe - 使用SW_HIDE隐藏窗口
-                ctypes.windll.shell32.ShellExecuteW(
-                    None, "runas", current_exe, None, None, 0
-                )
-            else:
-                # Python脚本 - 使用pythonw.exe隐藏控制台窗口
-                pythonw_exe = sys.executable.replace('python.exe', 'pythonw.exe')
-                ctypes.windll.shell32.ShellExecuteW(
-                    None, "runas", pythonw_exe, f'"{script_path}"', None, 0
-                )
-            
-            # 退出当前程序
-            QApplication.quit()
-            sys.exit(0)
-            
-        except Exception as e:
-            # 如果启动失败，显示窗口并提示错误
-            self.show()
-            QMessageBox.critical(self, "错误", f"无法以管理员身份启动程序: {str(e)}")
+            QMessageBox.critical(self, "错误", f"系统诊断失败: {str(e)}")
     
     def show_about(self):
         """显示关于对话框"""
-        about_dialog = AboutDialog(self)
-        about_dialog.exec_()
+        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton, QScrollArea
+        from PyQt5.QtCore import QUrl
+        from PyQt5.QtGui import QDesktopServices
+        
+        # 创建自定义对话框
+        dialog = QDialog(self)
+        dialog.setWindowTitle("关于")
+        dialog.setFixedSize(500, 600)
+        
+        layout = QVBoxLayout(dialog)
+        
+        # 创建滚动区域
+        scroll_area = QScrollArea()
+        scroll_widget = QWidget()
+        scroll_layout = QVBoxLayout(scroll_widget)
+        
+        # 标题
+        title_label = QLabel("网络适配器管理工具 v1.1")
+        title_label.setStyleSheet("font-size: 16px; font-weight: bold; margin: 10px 0;")
+        scroll_layout.addWidget(title_label)
+        
+        # 描述
+        desc_label = QLabel("Windows系统网络适配器速度和双工模式管理工具，支持图形化界面操作。\n为NA（广软网协）而做")
+        desc_label.setWordWrap(True)
+        desc_label.setStyleSheet("margin: 10px 0;")
+        scroll_layout.addWidget(desc_label)
+        
+        # 功能特性
+        features_text = """🔧 核心功能:
+• 网络适配器管理 - 查看和修改网络适配器速度和双工模式
+• 实时状态显示 - 显示IP地址、连接状态和网络速度
+• 智能过滤 - 支持仅显示有线网卡，过滤无线适配器
+• 多线程处理 - 后台操作，界面响应流畅
+
+🌐 系统兼容性:
+• Windows版本支持 - Windows 7/8/10/11 (32位/64位)
+• PowerShell兼容 - 支持PowerShell 5.x 和 PowerShell 7.x
+• 多路径检测 - 自动检测系统中可用的PowerShell版本
+• WMI兼容性 - 智能WMI连接管理，支持多线程环境
+• 权限管理 - 多种管理员权限检测方法，自动提权
+
+🛡️ 健壮性设计:
+• 系统诊断 - 内置兼容性检查和诊断工具
+• 错误恢复 - 智能错误处理和降级方案
+• 资源管理 - 支持多种部署方式（源码/打包exe）
+• 日志系统 - 详细的操作日志和错误追踪
+
+开发信息:
+• 基于Python和PyQt5开发
+• 使用WMI和PowerShell进行系统管理
+• 开源项目，欢迎贡献代码
+
+许可证: MIT License"""
+        
+        features_label = QLabel(features_text)
+        features_label.setWordWrap(True)
+        features_label.setStyleSheet("margin: 10px 0;")
+        scroll_layout.addWidget(features_label)
+        
+        # GitHub链接按钮
+        github_btn = QPushButton("🔗 项目地址: https://github.com/CurtisYan/NetAdapterTool")
+        github_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #0366d6;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                text-align: left;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #0256cc;
+            }
+            QPushButton:pressed {
+                background-color: #024ea4;
+            }
+        """)
+        github_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://github.com/CurtisYan/NetAdapterTool")))
+        scroll_layout.addWidget(github_btn)
+        
+        scroll_widget.setLayout(scroll_layout)
+        scroll_area.setWidget(scroll_widget)
+        scroll_area.setWidgetResizable(True)
+        layout.addWidget(scroll_area)
+        
+        # 关闭按钮
+        close_btn = QPushButton("关闭")
+        close_btn.clicked.connect(dialog.accept)
+        layout.addWidget(close_btn)
+        
+        dialog.exec_()
     
     def closeEvent(self, event):
-        """关闭程序时的处理"""
+        """关闭程序处理"""
         logging.info("程序关闭中...")
         
-        # 停止工作线程
-        if self.worker_thread and self.worker_thread.isRunning():
-            logging.info("停止工作线程")
-            self.worker_thread.quit()
-            self.worker_thread.wait()
-        
-        # 停止刷新线程
-        if self.refresh_thread and self.refresh_thread.isRunning():
-            logging.info("停止刷新线程")
-            self.refresh_thread.quit()
-            self.refresh_thread.wait()
+        # 停止所有线程
+        threads = [self.worker_thread, self.refresh_thread, self.init_thread]
+        for thread in threads:
+            if thread and thread.isRunning():
+                thread.quit()
+                thread.wait(3000)  # 最多等待3秒
         
         logging.info("程序已关闭")
         event.accept()
 
 
 def main():
-    app = QApplication(sys.argv)
-    
-    # 设置应用程序信息
-    app.setApplicationName("网络适配器管理工具")
-    app.setApplicationVersion("1.0")
-    
-    # 设置应用程序图标
     try:
-        icon_path = os.path.join(os.path.dirname(__file__), "img", "NA.ico")
-        if os.path.exists(icon_path):
-            app.setWindowIcon(QIcon(icon_path))
-    except Exception:
-        pass  # 静默失败，不影响程序启动
-    
-    # 创建主窗口
-    window = NetworkAdapterGUI()
-    window.show()
-    
-    sys.exit(app.exec_())
+        # 隐藏控制台窗口
+        try:
+            import ctypes
+            import ctypes.wintypes
+            
+            # 获取控制台窗口句柄
+            kernel32 = ctypes.windll.kernel32
+            user32 = ctypes.windll.user32
+            
+            # 获取当前进程的控制台窗口
+            console_window = kernel32.GetConsoleWindow()
+            if console_window:
+                # 隐藏控制台窗口 (SW_HIDE = 0)
+                user32.ShowWindow(console_window, 0)
+        except Exception as e:
+            # 如果隐藏失败，继续运行程序
+            pass
+        
+        print("Starting Network Adapter Tool...")
+        print(f"Python version: {sys.version}")
+        print(f"Working directory: {os.getcwd()}")
+        
+        app = QApplication(sys.argv)
+        
+        # 设置应用程序信息
+        app.setApplicationName("网络适配器管理工具")
+        app.setApplicationVersion("1.1")
+        print("QApplication created successfully")
+        
+        # 设置应用程序图标
+        try:
+            # 支持多种部署方式的图标路径查找
+            possible_icon_paths = [
+                os.path.join(os.path.dirname(__file__), "img", "NA.ico"),  # 源码运行
+                os.path.join(os.path.dirname(os.path.abspath(__file__)), "img", "NA.ico"),  # 绝对路径
+                os.path.join(os.getcwd(), "img", "NA.ico"),  # 当前工作目录
+                "img/NA.ico",  # 相对路径
+                "NA.ico"  # 同目录
+            ]
+            
+            icon_loaded = False
+            for icon_path in possible_icon_paths:
+                print(f"Looking for icon at: {icon_path}")
+                if os.path.exists(icon_path):
+                    app.setWindowIcon(QIcon(icon_path))
+                    print("Icon loaded successfully")
+                    icon_loaded = True
+                    break
+            
+            if not icon_loaded:
+                print("Icon file not found in any location")
+        except Exception as e:
+            print(f"Icon loading error: {e}")
+        
+        # 创建主窗口
+        print("Creating main window...")
+        window = NetworkAdapterGUI()
+        print("Main window created successfully")
+        
+        window.show()
+        print("Main window shown, starting event loop...")
+        
+        sys.exit(app.exec_())
+        
+    except Exception as e:
+        print(f"CRITICAL ERROR in main(): {e}")
+        import traceback
+        traceback.print_exc()
+        input("Press Enter to exit...")  # 保持控制台窗口打开
 
 
 if __name__ == "__main__":
